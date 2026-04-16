@@ -1,0 +1,47 @@
+[Unit]
+Description=FlagModel Embedder Service
+Documentation=https://github.com/FlagAI-Open/FlagEmbedding
+After=network.target
+
+[Service]
+Type=simple
+User=li
+Group=li
+
+# 工作目录
+WorkingDirectory=/data/FlagEmbedding
+
+# 虚拟环境路径
+Environment="VENV_PATH=/data/FlagEmbedding/.venv"
+
+# 环境变量（可按需修改）
+Environment="MODEL_PATH=/model/bge-m3"
+Environment="HOST=0.0.0.0"
+Environment="PORT=10010"
+Environment="USE_FP16=false"
+# Worker 数量：2 个 worker，内存占用更低
+Environment="WORKERS=2"
+Environment="PATH=/usr/bin:/usr/local/bin"
+
+# 启动命令
+ExecStart=/data/FlagEmbedding/start.sh
+
+# 重启策略
+Restart=on-failure
+RestartSec=10
+
+# 资源限制
+LimitNOFILE=65535
+
+# 内存限制：总内存不超过 64G
+# bge-m3 模型每个进程约占用 8-12GB，2 个 worker + 主进程 ≈ 30GB
+# 设置 MemoryMax=64G 确保安全余量
+MemoryMax=64G
+MemoryHigh=50G
+
+# 安全性设置
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

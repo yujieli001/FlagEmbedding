@@ -1,0 +1,74 @@
+import os
+import logging
+from FlagEmbedding import FlagModel
+from flask import Flask, request, jsonify
+from werkzeug.exceptions import BadRequest, InternalServerError
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# 从环境变量读取配置
+MODEL_PATH = os.environ.get('MODEL_PATH', '/model/bge-m3')
+HOST = os.environ.get('HOST', '0.0.0.0')
+PORT = int(os.environ.get('PORT', 10010))
+USE_FP16 = os.environ.get('USE_FP16', 'false').lower() == 'true'
+
+# 初始化模型
+logger.info(f"Loading model from {MODEL_PATH}")
+try:
+    model = FlagModel(
+        MODEL_PATH,
+        use_fp16=USE_FP16
+    )
+    logger.info("Model loaded successfully")
+except Exception as e:
+    logger.error(f"Failed to load model: {e}")
+    raise
+
+app = Flask(__name__)
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    """健康检查接口"""
+    return jsonify({"status": "healthy"})
+
+
+@app.route("/embed", methods=["POST"])
+def embed():
+    try:
+        if not request.is_json:
+            raise BadRequest("Content-Type must be application/json")
+
+        data = request.get_json()
+        if not data or "texts" not in data:
+            raise BadRequest("Missing required field: texts")
+
+        texts = data["texts"]
+        if not isinstance(texts, list):
+            raise BadRequest("texts must be a list")
+
+        vecs = model.encode(texts)
+        return jsonify({"embeddings": vecs.tolist()})
+
+    except BadRequest:
+        raise
+    except Exception as e:
+        logger.error(f"Embedding error: {e}")
+        raise InternalServerError(str(e))
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """全局异常处理"""
+    logger.error(f"Unhandled exception: {e}")
+    return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    logger.info(f"Starting server on {HOST}:{PORT}")
+    app.run(host=HOST, port=PORT)
