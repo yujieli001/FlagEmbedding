@@ -1,5 +1,5 @@
 [Unit]
-Description=FlagModel Embedder Service
+Description=FlagModel Reranker Service
 Documentation=https://github.com/FlagAI-Open/FlagEmbedding
 After=network.target
 
@@ -13,22 +13,22 @@ WorkingDirectory=/data/FlagEmbedding
 
 # ===== 服务配置 =====
 # 只需修改此处 MODEL_NAME，MODEL_PATH 会自动生成
-Environment="EMBEDDER_MODEL_NAME=BAAI/bge-m3"
-Environment="EMBEDDER_MODEL_PATH=/model/bge-m3"
-Environment="EMBEDDER_VENV_PATH=/data/FlagEmbedding/.venv"
+Environment="RERANKER_MODEL_NAME=BAAI/bge-reranker-v2-m3"
+Environment="RERANKER_MODEL_PATH=/model/bge-reranker-v2-m3"
+Environment="RERANKER_VENV_PATH=/data/FlagEmbedding/.venv"
 Environment="PATH=/usr/bin:/usr/local/bin"
 
 # 服务配置
-Environment="EMBEDDER_HOST=0.0.0.0"
-Environment="EMBEDDER_PORT=10010"
-Environment="EMBEDDER_USE_FP16=false"
-Environment="EMBEDDER_USE_GPU=false"
+Environment="RERANKER_HOST=0.0.0.0"
+Environment="RERANKER_PORT=10020"
+Environment="RERANKER_USE_FP16=false"
+Environment="RERANKER_USE_GPU=false"
 
 # Worker 数量
-Environment="EMBEDDER_WORKERS=2"
+Environment="RERANKER_WORKERS=2"
 
 # 启动命令
-ExecStart=/data/FlagEmbedding/embedder-start.sh
+ExecStart=/data/FlagEmbedding/reranker-start.sh
 
 # 重启策略
 Restart=on-failure
