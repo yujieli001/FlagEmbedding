@@ -1,82 +1,131 @@
 import os
+import math
 import torch
 from FlagEmbedding import FlagReranker
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 
-app = FastAPI(title="FlagReranker Service")
+app = FastAPI(title="Dify Compatible Reranker")
 
+# =========================
+# 请求结构（必须和 Dify 对齐）
+# =========================
 class RerankRequest(BaseModel):
     query: str
     documents: List[str]
-    model: str = "reranker"
+    score_threshold: float | None = None  # Dify 可能传入的阈值
 
-class RerankResult(BaseModel):
-    index: int
-    score: float
-    document: str
-
-class RerankResponse(BaseModel):
-    object: str = "list"
-    data: List[RerankResult]
-    model: str
-
-# 从环境变量读取配置
+# =========================
+# 环境变量配置
+# =========================
 MODEL_NAME = os.environ.get('RERANKER_MODEL_NAME', 'BAAI/bge-reranker-v2-m3')
 MODEL_PATH = os.environ.get('RERANKER_MODEL_PATH', f'/model/{MODEL_NAME.split("/")[-1]}')
 USE_FP16 = os.environ.get('RERANKER_USE_FP16', 'false').lower() == 'true'
+USE_GPU = os.environ.get('RERANKER_USE_GPU', 'false').lower() == 'true'
 HOST = os.environ.get('RERANKER_HOST', '0.0.0.0')
 PORT = int(os.environ.get('RERANKER_PORT', 10020))
 
-print(f"Loading reranker model: {MODEL_PATH}")
+print(f"🚀 Loading reranker model: {MODEL_PATH}")
 
+# =========================
 # 初始化模型
+# =========================
+device = 'cuda' if torch.cuda.is_available() and USE_GPU else 'cpu'
+
 model = FlagReranker(
     MODEL_PATH,
     use_fp16=USE_FP16,
-    devices='cuda' if torch.cuda.is_available() and os.environ.get('RERANKER_USE_GPU', 'false').lower() == 'true' else 'cpu'
+    devices=device
 )
 
-@app.post("/rerank")
-@app.post("/v1/rerank")
-async def rerank_route(request: RerankRequest):
-    """Rerank 接口 - 兼容 OpenAI/AnythingLLM 格式"""
-    try:
-        if not request.query or not request.documents:
-            raise HTTPException(status_code=400, detail="query or documents missing")
+print(f"✅ Model loaded on {device}")
 
-        # 单条处理，避免 Qwen3 模型的 batch size 限制
-        scores = []
-        for doc in request.documents:
-            score = model.compute_score([[request.query, doc]])
-            scores.append(score[0] if isinstance(score, list) else score)
+# =========================
+# 工具函数：sigmoid归一化（关键）
+# =========================
+def sigmoid(x):
+    try:
+        return 1 / (1 + math.exp(-x))
+    except:
+        return 0.0
+
+# =========================
+# 核心接口（Dify调用）
+# =========================
+@app.post("/v1/rerank")
+@app.post("/rerank")
+async def rerank(request: RerankRequest):
+    try:
+        query = request.query
+        docs = request.documents
+
+        if not query or not docs:
+            return {"results": []}
+
+        # 构造 pairs
+        pairs = [(query, d) for d in docs]
+        scores = model.compute_score(pairs)
+
+        if not isinstance(scores, list):
+            scores = [scores]
+
+        # 绑定 index + score + document，并使用 sigmoid 归一化
+        results = []
+        for i, (score, doc) in enumerate(zip(scores, docs)):
+            normalized_score = sigmoid(float(score))
+            results.append({
+                "index": i,
+                "relevance_score": normalized_score,
+                "score": normalized_score,
+                "document": doc
+            })
 
         # 按分数从高到低排序
-        results = [
-            RerankResult(index=i, score=float(score), document=doc)
-            for i, (score, doc) in enumerate(zip(scores, request.documents))
-        ]
-        results.sort(key=lambda x: x.score, reverse=True)
+        results.sort(key=lambda x: x["score"], reverse=True)
 
-        return RerankResponse(data=results, model=MODEL_NAME)
+        # 应用分数阈值过滤
+        threshold = request.score_threshold or 0.0
+        results = [r for r in results if r["score"] >= threshold]
+
+        print("RERANK RESULTS:", results)
+
+        return {"results": results}
+
     except Exception as e:
+        print("❌ Error:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# =========================
+# 健康检查
+# =========================
 @app.get("/health")
 async def health():
-    """健康检查"""
     return {"status": "ok", "model": MODEL_NAME}
 
+
+# =========================
+# 模型列表（兼容一些客户端）
+# =========================
 @app.get("/v1/models")
 async def list_models():
-    """模型列表"""
     return {
         "object": "list",
-        "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "local"}]
+        "data": [
+            {
+                "id": MODEL_NAME,
+                "object": "model",
+                "owned_by": "local"
+            }
+        ]
     }
 
+
+# =========================
+# 启动服务
+# =========================
 if __name__ == "__main__":
     import uvicorn
-    print(f"Starting reranker service on {HOST}:{PORT}")
-    uvicorn.run(app, host=HOST, port=PORT, workers=2)
+    print(f"🚀 Starting service at http://{HOST}:{PORT}")
+    uvicorn.run(app, host=HOST, port=PORT, workers=1)
